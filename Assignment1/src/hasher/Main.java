@@ -5,14 +5,8 @@ import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.util.Random;
 import java.util.Scanner;
 
 import javax.swing.AbstractAction;
@@ -32,12 +26,40 @@ import javax.swing.SwingConstants;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
+import WebUtilities.WebScraper;
+import cache.Cache;
+import metrics.Cluster;
+import metrics.KMedoids;
+import metrics.Point;
+import tree.BTree;
+
 public class Main {
 
 	private JFrame frame;
 	private JTextField textField;
 	// Keeps track of the amount of urls
-	int urlCount = 0;
+	int urlCount = 105;
+	int urlIndex = 0;
+	double fc = 0;
+	String foundUrl = "";
+
+	// WebScraper to get links from pages
+	WebScraper scraper = new WebScraper();
+	
+	// Cache to get info faster
+	Cache cache = new Cache();
+
+	// This hash table will keep track of the amount of documents that contain a
+	// certain word.
+	final HashTable frequencyHashie = new HashTable();
+	
+	BTree[] trees = new BTree[5];
+	
+	String[] urlsList = new String[105];
+	
+	Cluster[] clusters = new Cluster[5];
+
+	private static final String URL_FILE = "C:/Users/rober/csc365-new-workspace/Assignment2/Urls.txt";
 
 	/**
 	 * Launch the application.
@@ -80,6 +102,70 @@ public class Main {
 		return Math.abs(tfidf);
 	}
 
+	public void setHashies(String link) throws IOException {
+		System.out.println(link);
+		
+		HashTable urlHashie = new HashTable();
+		urlsList[urlIndex] = link;
+		Document urlDoc = Jsoup.connect(link).get();
+		String[] urlWordCount = urlDoc.body().text().split(" ");
+
+		// Adds all elements to a hash table
+		for (int j = 0; j < urlWordCount.length; j++) {
+			urlHashie.addOne(urlWordCount[j].toLowerCase());
+		}
+		// Adds all keys to the frequency table
+		for (int j = 0; j < urlHashie.table.length; j++) {
+			for (HashTable.Node p = urlHashie.table[j]; p != null; p = p.next) {
+				frequencyHashie.addOne(p.key.toLowerCase());
+			}
+		}
+	}
+	
+	public double getUrlFC(String url) {
+		Document doc;
+		HashTable hashie = new HashTable();
+		double fc = 0;
+		String text = "";
+
+		System.out.println("The url is " + url);
+		try {
+			doc = Jsoup.connect(url).get();
+		} catch (Exception EH) {
+			JOptionPane.showMessageDialog(frame, "Please enter a valid URL.", "Oops",
+			        JOptionPane.WARNING_MESSAGE);
+			textField.requestFocusInWindow();
+			textField.selectAll();
+			return -1;
+		}
+
+		text = doc.body().text();
+		String[] wordCount = text.split(" ");
+
+		for (int i = 0; i < wordCount.length; i++) {
+			hashie.addOne(wordCount[i].toLowerCase());
+		}
+		for (int i = 0; i < hashie.table.length; i++) {
+			for (HashTable.Node p = hashie.table[i]; p != null; p = p.next) {
+
+				fc = tfidfCount(urlCount, frequencyHashie.get(p.key.toLowerCase()), hashie.table.length,
+				        hashie.get(p.key.toLowerCase())) + fc;
+			}
+		}
+		return fc;
+	}
+	
+	public void addUrlToCache(String url) {
+		double urlFc = getUrlFC(url);
+		
+		try {
+			cache.addToCache(url, urlFc);
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+	}
+	
 	/**
 	 * Initialize the contents of the frame.
 	 * 
@@ -88,7 +174,7 @@ public class Main {
 	private void initialize() throws IOException {
 		frame = new JFrame();
 		frame.setResizable(false);
-		frame.setBounds(100, 100, 552, 237);
+		frame.setBounds(100, 100, 929, 686);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
 		textField = new JTextField();
@@ -100,35 +186,55 @@ public class Main {
 		textArea.setEditable(false);
 		textArea.setBackground(new Color(240, 240, 240));
 		textArea.setBorder(BorderFactory.createLoweredBevelBorder());
+		
 
-		// This hash table will keep track of the amount of documents that contain a
-		// certain word.
-		final HashTable frequencyHashie = new HashTable();
-
-		final File urlFile = new File("C:\\Users\\rober\\csc365-new-workspace\\Assignment1\\src\\hasher\\URL_Text_File.txt");
+		final File urlFile = new File(URL_FILE);
 		Scanner sc = new Scanner(urlFile);
 		String[] urls = sc.next().split(",");
+		//System.out.println(urls[0]);
 
 		// Create a table that keeps track of the amount of times a document has a word
 		// at least once in it.
+		int treeCounter = 0;
 		for (String url : urls) {
-			HashTable urlHashie = new HashTable();
-			urlCount++;
-			Document urlDoc = Jsoup.connect(url).get();
-			String[] urlWordCount = urlDoc.body().text().split(" ");
-
-			// Adds all elements to a hash table
-			for (int i = 0; i < urlWordCount.length; i++) {
-				urlHashie.addOne(urlWordCount[i].toLowerCase());
-			}
-			// Adds all keys to the frequency table
-			for (int i = 0; i < urlHashie.table.length; i++) {
-				for (HashTable.Node p = urlHashie.table[i]; p != null; p = p.next) {
-					frequencyHashie.addOne(p.key.toLowerCase());
+			BTree tempTree = new BTree(4);
+			tempTree.insertKey(url.toLowerCase());
+			Point p = new Point();
+			clusters[treeCounter] = new Cluster(p.createPoint(url));
+			urlsList[urlIndex] = url;
+			String[] links = scraper.getLinks(url);
+			setHashies(url);
+			urlIndex++;
+			int i = 0;
+			for (String link : links) {
+				tempTree.insertKey(link.toLowerCase());
+				System.out.println(link);
+				setHashies(link);
+				urlIndex++;
+				i++;
+				if (i == 20) {
+					break;
 				}
 			}
+			trees[treeCounter] = tempTree;
+			treeCounter ++;
 		}
 
+
+		// Iterate through the list of urls
+		for (String url : urlsList) {
+
+			if (url == null) {
+				break;
+			}
+			Random r = new Random();
+			Point temp = new Point();
+			Point p = temp.createPoint(url);
+			System.out.println("Adding to random cluster " + p.getKey());
+			clusters[r.nextInt(5)].addPoint(p);
+			addUrlToCache(url);
+		}
+		
 		sc.close();
 
 		final JButton btnSubmit = new JButton("Submit");
@@ -143,146 +249,105 @@ public class Main {
 			 */
 			public void actionPerformed(ActionEvent e) {
 
-				Document doc;
-				HashTable hashie = new HashTable();
-				Scanner sc = null;
-
 				String matchingUrl = "";
-				String text = "";
 				double comparer = 0;
-				double fc = 0;
-
-				try {
-					doc = Jsoup.connect(textField.getText()).get();
-				} catch (Exception EH) {
+				System.out.println("You entered : " + textField.getText());
+				fc = getUrlFC(textField.getText());
+				
+				if (fc == -1) {
 					JOptionPane.showMessageDialog(frame, "Please enter a valid URL.", "Oops",
 					        JOptionPane.WARNING_MESSAGE);
 					textField.requestFocusInWindow();
 					textField.selectAll();
 					return;
 				}
+				System.out.println("The tfidf of the input url is ... " + fc);
+				
+				// Iterate through the list of urls
+				for (String url : urlsList) {
 
-				text = doc.body().text();
-				String[] wordCount = text.split(" ");
-
-				for (int i = 0; i < wordCount.length; i++) {
-					hashie.addOne(wordCount[i].toLowerCase());
-				}
-				urlCount++;
-				for (int i = 0; i < hashie.table.length; i++) {
-					for (HashTable.Node p = hashie.table[i]; p != null; p = p.next) {
-						frequencyHashie.addOne(p.key.toLowerCase());
-
-						fc = tfidfCount(urlCount, frequencyHashie.get(p.key.toLowerCase()), hashie.table.length,
-						        hashie.get(p.key.toLowerCase())) + fc;
+					if (url == null) {
+						break;
 					}
-				}
 
-				try {
-					sc = new Scanner(urlFile);
-				} catch (FileNotFoundException e1) {
-					e1.printStackTrace();
-				}
-
-				String[] urls = sc.next().split(",");
-
-				for (String url : urls) {
-
-					double urlFc = 0;
-
-					HashTable urlHashie = new HashTable();
 					Document urlDoc = null;
-
 					try {
+						System.out.println("The url is ... " + url);
 						urlDoc = Jsoup.connect(url).get();
 					} catch (IOException e1) {
 						e1.printStackTrace();
 					}
 					
-					long webMills = 0;
-					long localMills = 0;
-					
-					File cacheFile = new File("C:\\Users\\rober\\csc365-new-workspace\\Assignment1\\FileCache\\" + urlDoc.title().replaceAll(" ", "").replaceAll(":", "") + ".txt");
-					
+					double urlFc = -1;
 					try {
-						String lastModified = Jsoup.connect(url).execute().header("Last-Modified");
-						SimpleDateFormat sdf = new SimpleDateFormat("EEE',' dd MMM yyyy HH':'mm':'ss zzz");
-						Date date = sdf.parse(lastModified);
-						webMills = date.getTime();
-						localMills = cacheFile.lastModified();
-					} catch (IOException e2) {
-						// TODO Auto-generated catch block
-						e2.printStackTrace();
-					} catch (ParseException e1) {
+						System.out.println("The url is in the cache");
+						urlFc = cache.getTfidfFromCache(url);
+						if (urlFc == -1 ) {
+							urlFc = getUrlFC(url);
+							cache.addToCache(url, urlFc);
+						}
+						System.out.println("The frequency count for " + url + " is " + urlFc);
+					} catch (IOException e1) {
 						// TODO Auto-generated catch block
 						e1.printStackTrace();
 					}
 					
-					if(cacheFile.exists() && localMills > webMills) {
-						try {
-							/*
-							FileReader reader = new FileReader(cacheFile);
-							String data = reader.read();
-							urlFc = reader.read();
-							System.out.println(urlFc);
-							*/
-							System.out.println("Trying for " + cacheFile);
-							String contents = new String(Files.readAllBytes(Paths.get(cacheFile.toString())));
-							System.out.println(contents + " for " + cacheFile);
-						} catch (IOException e1) {
-							// TODO Auto-generated catch block
-							e1.printStackTrace();
-						}
-					} else {
-						if (cacheFile.exists()) {
-							cacheFile.delete();
-						}
-						String[] urlWordCount = urlDoc.body().text().split(" ");
-	
-						for (int i = 0; i < urlWordCount.length; i++) {
-							urlHashie.addOne(urlWordCount[i].toLowerCase());
-						}
-	
-						for (int i = 0; i < urlHashie.table.length; i++) {
-							for (HashTable.Node p = urlHashie.table[i]; p != null; p = p.next) {
-									urlFc = tfidfCount(urlCount, frequencyHashie.get(p.key.toLowerCase()),
-									        urlHashie.table.length, urlHashie.get(p.key.toLowerCase())) + urlFc;
-							}
-						}
-
-						try {
-							FileWriter writer;
-							cacheFile.createNewFile();
-							writer = new FileWriter(cacheFile);
-							writer.write(String.valueOf(urlFc));
-							writer.close();
-						} catch (IOException e1) {
-							// TODO Auto-generated catch block
-							e1.printStackTrace();
+					if (urlFc != -1) {
+						System.out.println("This is what I am comparing with " + fc);
+						System.out.println("This is what I am comparing against " + urlFc);
+						double diff = Math.abs(fc - urlFc);
+						
+						if (comparer == 0) {
+							matchingUrl = urlDoc.title();
+							comparer = diff;
+							foundUrl = url;
+						} else if (diff == 0) {
+							matchingUrl = urlDoc.title();
+							foundUrl = url;
+							break;
+						} else if (diff < comparer) {
+							matchingUrl = urlDoc.title();
+							comparer = diff;
+							foundUrl = url;
+						} else {
 						}
 					}
-					
-					double diff = Math.abs(fc - urlFc);
-					
-					if (comparer == 0) {
-						matchingUrl = urlDoc.title();
-						comparer = diff;
-					} else if (urlFc == 0) {
-						matchingUrl = urlDoc.title();
-					} else if (diff < comparer) {
-						matchingUrl = urlDoc.title();
-						comparer = diff;
-					} else {
-					}
-
 				}
+				
+				int treeCount = 0;
+				for (BTree tree : trees) {
+					if (tree.keySearch(tree.getRoot(), foundUrl.toLowerCase(), 0) != null) {
+						System.out.println("Matching tree is "  + treeCount);
+						break;
+					} else {
+						System.out.println("Tree " + treeCount + " didn't work. Trying again.");
+					}
 
-				textArea.setText("The closest match is: " + matchingUrl);
-				sc.close();
-				//btnSubmit.setEnabled(false);
+					treeCount++;
+				}
+				
+				Cluster closestCluster = null;
+				double tempCalc = 0;
+				KMedoids kmedoids = new KMedoids();
+				for (Cluster cluster : clusters) {
+					System.out.println("The center is " + cluster.getCenter().getKey());
+					if (closestCluster == null) {
+						closestCluster = cluster;
+						tempCalc = kmedoids.calculate(cluster);
+					} else {
+						double calc = kmedoids.calculate(cluster);
+						if (calc < tempCalc) {
+							tempCalc = calc;
+							closestCluster = cluster;
+						}
+					}
+				}
+				System.out.println(closestCluster.printCluster());
+				textArea.setText("The closest match is: " + matchingUrl + "\n" + " The cluster for this url is " + closestCluster.printCluster());
 			}
 		};
 
+		// This is a bunch of auto generate gui stuff
 		btnSubmit.addActionListener(action);
 		textField.addActionListener(action);
 

@@ -4,10 +4,10 @@ public class HashTable {
 
 	static double RESIZE_THRESHOLD = .75;
 	
-	static class Node {
-		String key;
+	public static class Node {
+		public String key;
 		int value;
-		Node next;
+		public Node next;
 		
 		Node (String k, int v, Node n) {
 			key = k;
@@ -16,10 +16,10 @@ public class HashTable {
 		}
 	}
 	
-	Node[] table = new Node[16];
+	public Node[] table = new Node[16];
 	int count = 0;
 	
-	int get (String k) {
+	public int get (String k) {
 		int h = k.hashCode();
 		int i = h & (table.length - 1);
 		for (Node p = table[i]; p != null; p = p.next) {
@@ -28,7 +28,7 @@ public class HashTable {
 		return 0;
 	}
 	
-	void addOne (String k) {
+	public void addOne (String k) {
 		int h = k.hashCode();
 		int i = h & (table.length -1);
 		for (Node p = table[i]; p != null; p = p.next) {
